@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="description" content="X Spaces Live + Replay (Master-based) Converter + Player">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Space Converter + Player</title>
+  <link rel="shortcut icon" href="https://i.imgur.com/rExrEtv.png" type="image/x-icon">
+  <style>
+    *, *:before, *:after { box-sizing: border-box; }
+    * { margin:0; padding:0; text-decoration:none; outline:none; }
+    html, body { background-color:#11131a; color:#AAB8C2; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif; }
+    a { color:#1da1f2; }
+    a:hover { color:#77c7f9; }
+    [hidden] { display:none !important; }
+
+    .container {
+      display:flex; flex-direction:column; gap:1rem;
+      max-width:720px; margin:25px auto; padding:20px;
+      background-color:#141D26; border-radius:12px; box-shadow:0 0 10px rgba(0,0,0,.5);
+    }
+    .title { font-size:18px; color:#e6eef6; display:flex; align-items:center; gap:10px; }
+    .title .logo { width:30px; height:30px; display:grid; place-items:center; border-radius:9px; background:linear-gradient(135deg,#2daaff,#5866e8); color:#fff; font-size:17px; }
+    .sectionTitle { font-size:15px; font-weight:bold; color:#d6e2ee; }
+
+    textarea, .dlInput, .dlSelect {
+      width:100%; padding:10px; border:1px solid #243447; border-radius:8px;
+      background-color:#1B2836; color:#AAB8C2; font:inherit; font-size:13px;
+    }
+    textarea { height:84px; resize:vertical; }
+    textarea:focus, .dlInput:focus, .dlSelect:focus { border-color:#1d9bf0; }
+    textarea.out { height:58px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size:12px; }
+
+    .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    button, .btnLink {
+      display:inline-flex; align-items:center; justify-content:center; gap:8px;
+      padding:10px 14px; background-color:#184d6f; color:#ecf0f1; border:none; border-radius:8px;
+      cursor:pointer; font:inherit; font-size:14px; transition:background .2s, opacity .2s;
+    }
+    button:hover, .btnLink:hover { background-color:#1386cc; color:#fff; }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    button.primary { background:linear-gradient(135deg,#1e9fff,#356cf0); min-width:150px; }
+    button.secondary, .btnLink { background-color:#1B2836; border:1px solid #243447; }
+    button.secondary:hover, .btnLink:hover { background-color:#223244; }
+    button.small, .btnLink { padding:7px 12px; font-size:13px; }
+    button.danger { background:#3a1f28; border:1px solid #5a3440; color:#ffb3c0; }
+
+    label { font-size:13px; opacity:.95; }
+    code { color:#f1517a; }
+    mark { background:none; border-bottom:2px dotted #1da1f2; color:#AAB8C2; padding-bottom:1px; }
+    .hint { opacity:.85; font-size:12px; line-height:1.5; }
+
+    .status { font-size:13px; line-height:1.45; padding:9px 11px; border-radius:8px; background:#0f1822; border:1px solid #223244; overflow-wrap:anywhere; }
+    .status.error { color:#ff8a95; border-color:#6a2a36; }
+    .status.success { color:#80C14B; border-color:#2f5a2a; }
+    .status.warn { color:#e6c15a; border-color:#5c4a1f; }
+    .status.busy::before { content:''; display:inline-block; width:10px; height:10px; margin-right:8px; vertical-align:-1px; border:2px solid rgba(255,255,255,.3); border-top-color:#fff; border-radius:50%; animation:spin 1s linear infinite; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+
+    .linkCard { display:flex; flex-direction:column; gap:7px; padding:12px; background:#111b25; border:1px solid #223244; border-radius:10px; }
+    .linkHead { display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
+    .tag { font-size:11px; font-weight:800; letter-spacing:.8px; padding:3px 9px; border-radius:99px; }
+    .tag.live { background:#4a1420; color:#ff8da1; }
+    .tag.master { background:#2d2150; color:#c4b2ff; }
+    .tag.replay { background:#163a32; color:#7ff0c6; }
+    .tag.space { background:#12324d; color:#8ecbff; }
+    .spaceTitle { font-size:15px; font-weight:bold; color:#e6eef6; overflow-wrap:anywhere; }
+    .spaceState { font-size:11px; font-weight:800; letter-spacing:.6px; padding:2px 8px; border-radius:99px; background:#2c3c52; color:#b7c9df; }
+    .spaceState.live { background:#4a1420; color:#ff8da1; }
+    .spaceState.ended { background:#163a32; color:#7ff0c6; }
+    .spaceState.scheduled { background:#3a3214; color:#ffd97a; }
+    .note { font-size:12px; opacity:.85; }
+    .note.ok { color:#80C14B; } .note.bad { color:#ff8a95; } .note.warn { color:#e6c15a; }
+
+    audio { width:100%; }
+
+    details summary {
+      list-style:none; display:flex; justify-content:space-between; align-items:center;
+      font-size:15px; font-weight:bold; cursor:pointer; user-select:none; padding:6px 0;
+    }
+    details summary::-webkit-details-marker { display:none; }
+    details summary::after { content:''; border-top:9px solid #928f8f; border-inline:6px solid transparent; transition:.2s; }
+    details[open] summary::after { transform:rotate(-180deg); }
+    ol { padding:.5rem 0 0 1.25rem; display:flex; flex-direction:column; gap:8px; }
+    li { line-height:1.6; font-size:14px; }
+    li::marker { color:#928f8f; }
+
+    .dlGrid { display:flex; gap:10px; flex-wrap:wrap; }
+    .dlField { flex:1 1 180px; display:flex; flex-direction:column; gap:6px; }
+    .dlToggle { display:flex; align-items:center; gap:8px; user-select:none; font-size:13px; }
+    .bar { height:8px; border-radius:99px; background:#0f1822; border:1px solid #223244; overflow:hidden; }
+    .bar > div { height:100%; width:0; background:linear-gradient(90deg,#1e9fff,#4de2a3); transition:width .25s; }
+    .bar > div.live { width:100% !important; background:repeating-linear-gradient(45deg,#ff5d7a 0 10px,#d93b5b 10px 20px); background-size:28px 28px; animation:stripe 1s linear infinite; }
+    @keyframes stripe { to { background-position:28px 0; } }
+    .stats { font-size:12px; opacity:.9; font-variant-numeric:tabular-nums; }
+    .dlLog { white-space:pre-wrap; font-size:12px; line-height:1.4; background:#0a0c10; padding:10px; border-radius:10px; border:1px solid #223; height:170px; overflow:auto; font-family: ui-monospace, Menlo, Consolas, monospace; }
+  </style>
+</head>
+<body>
+
+  <!-- ================= LINK CONVERTER + PLAYER ================= -->
+  <div class="container">
+    <div class="title"><span class="logo">𝕏</span> Space Converter + Player</div>
+
+    <label for="anyInput">Paste a <b>Space link</b> (x.com/i/spaces/…) or any stream link: <b>LIVE</b>, <b>MASTER</b>, or <b>REPLAY</b></label>
+    <textarea id="anyInput" spellcheck="false" placeholder="https://x.com/i/spaces/1ABCdEfGhIjKl   or   …/dynamic_playlist.m3u8?type=live"></textarea>
+
+    <div class="row">
+      <button class="primary" id="convertBtn">Get Links</button>
+      <button class="secondary" id="pasteBtn">Paste</button>
+      <button class="secondary" id="clearBtn">Clear</button>
+    </div>
+
+    <div class="status" id="status">Paste a LIVE, MASTER or REPLAY link and press <b>Get Links</b>.</div>
+
+    <div class="linkCard" id="spaceCard" hidden>
+      <div class="linkHead"><span class="tag space">SPACE</span><span class="spaceState" id="spaceState"></span></div>
+      <div class="spaceTitle" id="spaceTitle"></div>
+      <div class="note" id="spaceMeta"></div>
+      <div class="row">
+        <button class="secondary small" id="copySpace">Copy Space Link</button>
+        <a class="btnLink" id="openSpace" target="_blank" rel="noopener noreferrer">Open on X ↗</a>
+      </div>
+    </div>
+
+    <div class="linkCard">
+      <div class="linkHead"><span class="tag replay">REPLAY</span><span class="note" id="replayNote">The recording link (verified to work)</span></div>
+      <textarea class="out" id="replayOut" readonly placeholder="REPLAY link will appear here"></textarea>
+      <div class="row">
+        <button class="secondary small" data-copy="replayOut">Copy</button>
+        <button class="secondary small" data-play="replayOut">▶ Play</button>
+        <a class="btnLink" id="replayOpen" target="_blank" rel="noopener noreferrer" hidden>Open ↗</a>
+      </div>
+    </div>
+
+    <div class="linkCard">
+      <div class="linkHead"><span class="tag live">LIVE</span><span class="note" id="liveNote">Dynamic link, only works while the Space is live</span></div>
+      <textarea class="out" id="liveOut" readonly placeholder="LIVE link will appear here"></textarea>
+      <div class="row">
+        <button class="secondary small" data-copy="liveOut">Copy</button>
+        <button class="secondary small" data-play="liveOut">▶ Play</button>
+      </div>
+    </div>
+
+    <div class="linkCard">
+      <div class="linkHead"><span class="tag master">MASTER</span><span class="note" id="masterNote">Master playlist that points to the replay</span></div>
+      <textarea class="out" id="masterOut" readonly placeholder="MASTER link will appear here"></textarea>
+      <div class="row">
+        <button class="secondary small" data-copy="masterOut">Copy</button>
+      </div>
+    </div>
+
+    <audio id="player" controls></audio>
+    <div class="row">
+      <button class="danger small" id="stopPlay">■ Stop playback</button>
+      <span class="hint">If browser playback fails, paste the link into <a href="https://mpv.io" target="_blank">MPV</a> or <a href="https://www.videolan.org/vlc/" target="_blank">VLC</a>.</span>
+    </div>
+
+    <details>
+      <summary>How this works</summary>
+      <ol>
+        <li>Paste a <mark>LIVE</mark> link (<code>dynamic_playlist.m3u8?type=live</code>), a <mark>MASTER</mark> link (<code>master_playlist.m3u8</code>) or a <mark>REPLAY</mark> link (<code>playlist_N.m3u8</code>).</li>
+        <li>After a Space ends, X moves the recording from the live folder (<code>x-media-live-stream-…</code>) to a replay folder (<code>periscope-replays-public</code> or <code>periscope-replay-direct-prod-…</code>) and sometimes to the <code>prod-fastly-p</code> server. The old converter only looked in the live folder, which is why its links broke.</li>
+        <li>This page tries every known location, follows the master playlist to the numbered <code>playlist_N</code>, and only shows a <mark>REPLAY</mark> link once it has actually loaded audio from it.</li>
+        <li>A <mark>Space link</mark> (<code>x.com/i/spaces/…</code>) is sent to your Cloudflare Worker, which asks X for the Space's stream link. Then everything above runs as normal.</li>
+        <li class="hint">Tip: you can link straight to a conversion: <code>yourpage.html?link=https://x.com/i/spaces/…</code></li>
+      </ol>
+    </details>
+  </div>
+
+  <!-- ================= DOWNLOADER ================= -->
+  <div class="container">
+    <div class="sectionTitle">Downloader</div>
+    <div class="hint">Downloads the REPLAY above (or the link you pasted), merges it into one file, and can convert it to MP3 in your browser. If the Space is still live, it keeps recording until you press Stop.</div>
+
+    <div class="dlGrid">
+      <div class="dlField">
+        <label for="dlFilename">File name</label>
+        <input id="dlFilename" class="dlInput" value="xspace_replay" spellcheck="false">
+      </div>
+      <div class="dlField">
+        <label for="dlFormat">Save as</label>
+        <select id="dlFormat" class="dlSelect">
+          <option value="mp3-128" selected>MP3 · 128 kbps</option>
+          <option value="mp3-64">MP3 · 64 kbps (smaller)</option>
+          <option value="mp3-192">MP3 · 192 kbps</option>
+          <option value="orig">Original (fastest)</option>
+        </select>
+      </div>
+      <div class="dlField">
+        <label for="dlConcurrency">Parallel downloads</label>
+        <select id="dlConcurrency" class="dlSelect">
+          <option value="2">2 (safest)</option>
+          <option value="4">4</option>
+          <option value="6" selected>6</option>
+          <option value="8">8</option>
+          <option value="12">12</option>
+          <option value="16">16 (fastest)</option>
+        </select>
+      </div>
+    </div>
+
+    <label class="dlToggle"><input type="checkbox" id="dlUseProxy" checked> Use CORS proxy (needed for X Spaces)</label>
+
+    <div class="row">
+      <button class="primary" id="dlDownload">⬇ Download</button>
+      <button class="danger" id="dlStop" disabled>■ Stop</button>
+    </div>
+
+    <div id="dlProgress" hidden>
+      <div class="bar"><div id="dlBar"></div></div>
+      <div class="stats" id="dlStats" style="margin-top:6px"></div>
+    </div>
+    <div class="dlLog" id="dlLog"></div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.6.15/dist/hls.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lamejs@1.2.1/lame.min.js"></script>
+  <script>
+  (() => {
+    'use strict';
+    // ── CORS PROXY CONFIG ───────────────────────────────────────────────
+    const MY_WORKER = "https://spaces-proxy2.wolfinator11.workers.dev/?url=";
+    const FALLBACK_PROXY = "https://api.allorigins.win/raw?url=";   // used only if the Worker is unreachable
+
+    const $ = id => document.getElementById(id);
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    const hostOf = u => { try { return new URL(u).hostname; } catch (_) { return 'unknown host'; } };
+    const fmtBytes = n => n >= 1073741824 ? (n / 1073741824).toFixed(2) + ' GB' : n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(0, n / 1024).toFixed(0) + ' KB';
+    const fmtTime = sec => { const s = Math.max(0, Math.round(sec)), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), x = s % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(x).padStart(2, '0'); };
+
+    function corsProxy(url, fallback = false) {
+      const base = (fallback || MY_WORKER.includes('YOURNAME')) ? FALLBACK_PROXY : MY_WORKER;
+      return base + encodeURIComponent(url);
+    }
+
+    // Fetch through the Worker (falls back to the public proxy if the Worker is down).
+    // Retries network errors / 5xx / 429 with backoff; 4xx are treated as "not here".
+    async function fetchVia(url, type = 'text', { retries = 0, signal, direct = false, headers } = {}) {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          let r;
+          const opts = { signal, cache: 'no-store', headers };
+          if (direct) r = await fetch(url, opts);
+          else {
+            try { r = await fetch(corsProxy(url), opts); }
+            catch (e) { if (signal?.aborted) throw e; r = await fetch(corsProxy(url, true), opts); }
+          }
+          if (!r.ok) throw Object.assign(new Error(`HTTP ${r.status} (${hostOf(url)})`), { status: r.status });
+          return type === 'text' ? await r.text() : await r.arrayBuffer();
+        } catch (e) {
+          if (signal?.aborted) throw new Error('Stopped');
+          const permanent = e.status && e.status < 500 && e.status !== 408 && e.status !== 429;
+          if (permanent || attempt >= retries) throw e.status ? e : new Error(`Network error (${hostOf(url)}). The proxy may be down.`);
+          await wait(600 * 2 ** attempt + Math.random() * 300);
+        }
+      }
+    }
+
+    // ═════════════ LINK LOGIC (ported from the working userscript) ═════════════
+    function extractM3u8(raw) {
+      const m = (raw || '').trim().match(/https?:\/\/[^\s<>"']+?\.m3u8(?:\?[^\s<>"']*)?/i);
+      return m ? m[0].replace(/[),.;]+$/, '') : '';
+    }
+    function masterUrl(url) {
+      return url.replace(/\?type=(?:live|replay)/g, '')
+        .replace('dynamic_playlist', 'master_playlist')
+        .replace(/playlist_\d+/g, 'master_playlist')
+        .replace(/master_dynamic_\d+/g, 'master_master_playlist');
+    }
+    // Every place the recording can live after the Space ends.
+    function candidates(url) {
+      const fallback = url.replace(/^(https?:\/\/)prod-fastly-[^/]+\.video\.pscp\.tv\//, '$1prod-fastly-p.video.pscp.tv/');
+      const paths = u => {
+        const live = u.match(/\/x-media-live-stream-([^/]+)\//);
+        if (live) return [u, u.replace(live[0], '/periscope-replays-public/'), u.replace(live[0], `/periscope-replay-direct-prod-${live[1]}-public/`)];
+        const replay = u.match(/\/periscope-replay-direct-prod-[^/]+\//);
+        if (replay) return [u, u.replace(replay[0], '/periscope-replays-public/')];
+        return [u];
+      };
+      return [...new Set([...paths(url), ...paths(fallback)])];
+    }
+    // LIVE (dynamic) link can only be built from a link that is still on the live-stream path.
+    function liveFrom(url) {
+      const clean = url.split('?')[0];
+      if (/\/periscope-replay/.test(clean)) return '';
+      if (/\/dynamic_playlist\.m3u8$/.test(clean)) return clean + '?type=live';
+      const d = clean.replace(/\/(?:master_master_playlist|master_playlist|playlist_\d+|master_dynamic_\d+)\.m3u8$/, '/dynamic_playlist.m3u8');
+      return d !== clean ? d + '?type=live' : '';
+    }
+    function parseManifest(txt, base) {
+      const lines = txt.replace(/\r/g, '').split('\n').map(s => s.trim());
+      const variants = [], segments = [];
+      let key = null, map = null, seq = 0, target = 6, pendingRange = null, pendingDur = 0, rangeEnd = 0, skipNext = false;
+      for (const line of lines) {
+        if (!line) continue;
+        if (line.startsWith('#')) {
+          if (line.startsWith('#EXT-X-MEDIA-SEQUENCE:')) seq = Number(line.split(':')[1]) || 0;
+          else if (line.startsWith('#EXT-X-TARGETDURATION:')) target = Number(line.split(':')[1]) || 6;
+          else if (line.startsWith('#EXT-X-KEY:') && !/METHOD=NONE/.test(line)) key = line;
+          else if (line.startsWith('#EXT-X-MAP:')) {
+            const uri = line.match(/URI="([^"]+)"/), range = line.match(/BYTERANGE="([^"]+)"/);
+            if (uri) map = { url: new URL(uri[1], base).href, range: range?.[1] || null };
+          } else if (line.startsWith('#EXTINF:')) pendingDur = parseFloat(line.slice(8)) || 0;
+          else if (line.startsWith('#EXT-X-BYTERANGE:')) {
+            const [len, off] = line.slice(17).split('@');
+            const offset = off !== undefined ? Number(off) : rangeEnd;
+            pendingRange = `${Number(len)}@${offset}`; rangeEnd = offset + Number(len);
+          } else if (line.startsWith('#EXT-X-STREAM-INF:')) skipNext = true;
+          continue;
+        }
+        const href = new URL(line, base).href;
+        if (skipNext) { variants.push(href); skipNext = false; continue; }
+        segments.push({ url: href, seq: seq++, range: pendingRange, dur: pendingDur });
+        pendingRange = null; pendingDur = 0;
+      }
+      return { variants, segments, key, map, target, ended: lines.includes('#EXT-X-ENDLIST') };
+    }
+    // Tries every candidate; follows master → playlist_N → segments. Returns the first that really has audio.
+    let lastWorking = '';
+    async function resolvePlaylist(url, { onStep, signal, direct } = {}) {
+      const base = /(?:playlist_\d+|master_dynamic_\d+)\.m3u8/.test(url) ? candidates(url) : candidates(masterUrl(url));
+      const urls = [...new Set([lastWorking && base.includes(lastWorking) ? lastWorking : null, ...base].filter(Boolean))];
+      const errors = [];
+      for (const candidate of urls) {
+        if (signal?.aborted) throw new Error('Stopped');
+        try {
+          onStep?.(candidate);
+          let current = candidate, master = /master_(?:master_)?playlist\.m3u8/.test(candidate) ? candidate : '';
+          for (let depth = 0; depth < 5; depth++) {
+            const txt = await fetchVia(current, 'text', { signal, direct, retries: 1 });
+            if (/master_playlist\.m3u8/.test(current)) {
+              master = master || current;
+              const numbered = txt.match(/playlist_\d+(?:\.m3u8)?/);
+              if (numbered) { current = current.replace('master_playlist', numbered[0].replace(/\.m3u8$/, '')); continue; }
+            }
+            const parsed = parseManifest(txt, current);
+            if (parsed.variants.length) { current = parsed.variants[0]; continue; }
+            if (!parsed.segments.length) throw new Error('playlist has no audio segments');
+            lastWorking = candidate;
+            return { url: current, master: master || masterUrl(current), ...parsed };
+          }
+          throw new Error('too many nested playlists');
+        } catch (e) {
+          if (signal?.aborted || e.message === 'Stopped') throw new Error('Stopped');
+          errors.push(hostOf(candidate) + ' ' + (candidate.match(/\/(x-media-live-stream|periscope-replays-public|periscope-replay-direct-prod)/)?.[1] || '') + ': ' + e.message);
+        }
+      }
+      const err = new Error(`All ${urls.length} replay locations failed.`);
+      err.details = errors;
+      throw err;
+    }
+
+    // ═════════════ CONVERTER UI ═════════════
+    const anyInput = $('anyInput'), statusEl = $('status');
+    const out = { live: $('liveOut'), master: $('masterOut'), replay: $('replayOut') };
+    const notes = { live: $('liveNote'), master: $('masterNote'), replay: $('replayNote') };
+    const replayOpen = $('replayOpen'), convertBtn = $('convertBtn');
+    let lastResolved = null;
+
+    function setStatus(text, type = '') { statusEl.innerHTML = ''; statusEl.append(text); statusEl.className = 'status' + (type ? ' ' + type : ''); }
+    function setNote(k, text, cls = '') { notes[k].textContent = text; notes[k].className = 'note' + (cls ? ' ' + cls : ''); }
+    function resetOutputs() {
+      Object.values(out).forEach(el => el.value = '');
+      setNote('replay', 'The recording link (verified to work)');
+      setNote('live', 'Dynamic link, only works while the Space is live');
+      setNote('master', 'Master playlist that points to the replay');
+      replayOpen.hidden = true; lastResolved = null;
+    }
+
+    // ── Space link → stream link (via the Worker's ?space= endpoint) ──
+    const SPACE_API = MY_WORKER.replace(/\?url=$/, '') + '?space=';
+    const spaceCard = $('spaceCard');
+    let currentSpace = null;
+    function extractSpaceId(raw) {
+      const v = (raw || '').trim();
+      return (v.match(/(?:x|twitter)\.com\/i\/spaces\/([A-Za-z0-9]{10,})/) || v.match(/^([A-Za-z0-9]{10,16})$/) || [])[1] || '';
+    }
+    async function lookupSpace(id) {
+      let r;
+      try { r = await fetch(SPACE_API + encodeURIComponent(id), { cache: 'no-store' }); }
+      catch (_) { throw new Error('Could not reach your Cloudflare Worker.'); }
+      const body = await r.text();
+      let j;
+      try { j = JSON.parse(body); } catch (_) { throw new Error('Your Worker does not support Space links yet. Deploy the new worker.js (see the instructions).'); }
+      if (!r.ok || j.error) throw new Error(j.error || `Worker error (HTTP ${r.status})`);
+      if (!j.mediaKey && !j.stream) throw new Error('Your Worker does not support Space links yet. Deploy the new worker.js.');
+      return j;
+    }
+    function renderSpace(s) {
+      currentSpace = s;
+      if (!s) { spaceCard.hidden = true; return; }
+      const st = /running/i.test(s.state) ? 'live' : /notstarted/i.test(s.state) ? 'scheduled' : 'ended';
+      const stateEl = $('spaceState');
+      stateEl.textContent = st === 'live' ? '● LIVE' : st === 'scheduled' ? 'SCHEDULED' : 'ENDED';
+      stateEl.className = 'spaceState ' + st;
+      $('spaceTitle').textContent = s.title || 'Untitled Space';
+      const bits = [];
+      if (s.host) bits.push('@' + s.host);
+      if (s.startedAt) bits.push(new Date(Number(s.startedAt)).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' }));
+      if (s.startedAt && s.endedAt > s.startedAt) bits.push(fmtTime((s.endedAt - s.startedAt) / 1000) + ' long');
+      if (st === 'scheduled' && s.scheduledStart) bits.push('starts ' + new Date(Number(s.scheduledStart)).toLocaleString());
+      $('spaceMeta').textContent = bits.join(' · ');
+      $('openSpace').href = 'https://x.com/i/spaces/' + s.id;
+      spaceCard.hidden = false;
+    }
+    $('copySpace').addEventListener('click', async () => {
+      if (!currentSpace) return;
+      const v = 'https://x.com/i/spaces/' + currentSpace.id, btn = $('copySpace');
+      try { await navigator.clipboard.writeText(v); } catch (_) {}
+      const old = btn.textContent; btn.textContent = 'Copied!'; setTimeout(() => btn.textContent = old, 1400);
+    });
+
+    async function convert() {
+      let url = extractM3u8(anyInput.value);
+      const spaceId = url ? '' : extractSpaceId(anyInput.value);
+      resetOutputs(); renderSpace(null);
+      if (!url && !spaceId) return setStatus('Paste a Space link (x.com/i/spaces/…) or a stream link ending in .m3u8.', 'error');
+      convertBtn.disabled = true;
+      if (spaceId) {
+        setStatus('Looking up the Space on X…', 'busy');
+        try {
+          const s = await lookupSpace(spaceId);
+          renderSpace(s);
+          if (/notstarted/i.test(s.state)) { convertBtn.disabled = false; return setStatus('This Space has not started yet. Try again once it is live.', 'warn'); }
+          url = s.stream;
+          if (!$('dlFilename').dataset.touched) $('dlFilename').value = [s.host && '@' + s.host, s.title || 'X Space', s.startedAt && new Date(Number(s.startedAt)).toISOString().slice(0, 10)].filter(Boolean).join(' - ').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 120);
+        } catch (e) {
+          convertBtn.disabled = false;
+          return setStatus(e.message, 'error');
+        }
+      }
+      const live = liveFrom(url);
+      if (live) { out.live.value = live; }
+      else setNote('live', 'Not available: this link is already on the replay server', 'warn');
+      out.master.value = masterUrl(url);
+      setStatus('Finding the replay…', 'busy');
+      try {
+        const r = await resolvePlaylist(url, { onStep: c => setStatus(`Checking ${hostOf(c)} · ${c.match(/\/(x-media-live-stream|periscope-replays-public|periscope-replay-direct-prod)/)?.[1] || 'stream'}…`, 'busy') });
+        lastResolved = r;
+        out.replay.value = r.url;
+        out.master.value = r.master;
+        replayOpen.href = r.url; replayOpen.hidden = false;
+        const dur = r.segments.reduce((s, x) => s + (x.dur || 0), 0);
+        if (r.ended) {
+          setNote('replay', `✓ Working: ${r.segments.length} chunks${dur ? ', ' + fmtTime(dur) + ' of audio' : ''}`, 'ok');
+          setNote('master', '✓ Working', 'ok');
+          if (live) setNote('live', 'The Space has ended, so this LIVE link no longer plays', 'warn');
+          setStatus('Done. REPLAY link found and verified.', 'success');
+        } else {
+          setNote('replay', `● Space is still LIVE. This playlist keeps growing (${fmtTime(dur)} so far)`, 'warn');
+          if (live) setNote('live', '✓ Space is live right now', 'ok');
+          setStatus('The Space is still live. The REPLAY link works now and will hold the full recording after it ends. Download can record it live.', 'warn');
+        }
+        if (!$('dlFilename').dataset.touched && !currentSpace) $('dlFilename').value = 'xspace_' + (r.url.match(/\/([A-Za-z0-9_-]{8,})\/[^/]*$/)?.[1] || 'replay').slice(0, 40);
+      } catch (e) {
+        setNote('replay', 'Not found', 'bad');
+        const box = document.createElement('div');
+        box.append(e.message === 'Stopped' ? 'Stopped.' : e.message + ' The replay may have expired, the host may not have saved a recording, or the proxy is blocked.');
+        if (e.details) { const d = document.createElement('div'); d.className = 'hint'; d.style.marginTop = '6px'; d.textContent = e.details.join(' | '); box.append(d); }
+        setStatus(box, 'error');
+      } finally { convertBtn.disabled = false; }
+    }
+
+    convertBtn.addEventListener('click', convert);
+    anyInput.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); convert(); } });
+    $('pasteBtn').addEventListener('click', async () => {
+      try { anyInput.value = (await navigator.clipboard.readText()).trim(); convert(); }
+      catch (_) { anyInput.focus(); setStatus('Clipboard blocked. Paste with Ctrl/Cmd+V.', 'warn'); }
+    });
+    $('clearBtn').addEventListener('click', () => { anyInput.value = ''; resetOutputs(); renderSpace(null); setStatus('Cleared.'); });
+    // Auto-convert when opened as page.html?link=<Space or stream link>
+    { const p = new URLSearchParams(location.search).get('link'); if (p) { anyInput.value = p; convert(); } }
+
+    document.querySelectorAll('[data-copy]').forEach(btn => btn.addEventListener('click', async () => {
+      const v = $(btn.dataset.copy).value.trim();
+      if (!v) return;
+      try { await navigator.clipboard.writeText(v); }
+      catch (_) { $(btn.dataset.copy).select(); document.execCommand('copy'); }
+      const old = btn.textContent; btn.textContent = 'Copied!'; setTimeout(() => btn.textContent = old, 1400);
+    }));
+
+    // ═════════════ PLAYER ═════════════
+    const player = $('player');
+    let currentHls = null;
+    function stopPlayback() {
+      try { player.pause(); } catch (_) {}
+      if (currentHls) { try { currentHls.destroy(); } catch (_) {} currentHls = null; }
+      player.removeAttribute('src'); try { player.load(); } catch (_) {}
+    }
+    function playUrl(url, label) {
+      if (!url) return setStatus(`No ${label} link yet. Press Get Links first.`, 'error');
+      stopPlayback();
+      if (window.Hls && Hls.isSupported()) {
+        // hls.js resolves real URLs; the proxy is applied only at the network layer.
+        const hls = new Hls({
+          enableWorker: true,
+          loader: class extends Hls.DefaultConfig.loader {
+            load(context, config, callbacks) { if (context?.url) context.url = corsProxy(context.url); super.load(context, config, callbacks); }
+          }
+        });
+        currentHls = hls;
+        hls.on(Hls.Events.ERROR, (_, d) => { if (d?.fatal) setStatus(`Playback error (${d.type}${d.details ? ' · ' + d.details : ''}). Try MPV/VLC, or the link may have expired.`, 'error'); });
+        hls.on(Hls.Events.MANIFEST_PARSED, () => player.play().catch(() => {}));
+        hls.loadSource(url); hls.attachMedia(player);
+        return setStatus(`Playing ${label}.`, 'success');
+      }
+      if (player.canPlayType('application/vnd.apple.mpegurl')) {
+        player.src = corsProxy(url); player.play().catch(() => {});
+        return setStatus(`Playing ${label} (native HLS).`, 'success');
+      }
+      setStatus("This browser can't play HLS. Copy the link into MPV or VLC.", 'error');
+    }
+    document.querySelectorAll('[data-play]').forEach(btn => btn.addEventListener('click', () => {
+      const k = btn.dataset.play;
+      playUrl($(k).value.trim(), k === 'liveOut' ? 'LIVE' : 'REPLAY');
+    }));
+    $('stopPlay').addEventListener('click', () => { stopPlayback(); setStatus('Playback stopped.'); });
+
+    // ═════════════ DOWNLOADER ═════════════
+    const dl = {
+      log: $('dlLog'), btn: $('dlDownload'), stop: $('dlStop'), name: $('dlFilename'), format: $('dlFormat'),
+      conc: $('dlConcurrency'), proxy: $('dlUseProxy'), prog: $('dlProgress'), bar: $('dlBar'), stats: $('dlStats'),
+    };
+    dl.name.addEventListener('input', () => dl.name.dataset.touched = '1');
+    const dlLog = msg => { dl.log.textContent += msg + '\n'; dl.log.scrollTop = dl.log.scrollHeight; };
+    let ctrl = null, phase = '', convertAbort = false;
+
+    const stats = { start: 0, bytes: 0, done: 0, total: 0, audioSec: 0, skipped: 0, live: false };
+    function renderStats() {
+      dl.prog.hidden = false;
+      const el = Math.max(.001, (performance.now() - stats.start) / 1000);
+      const pct = stats.total ? Math.min(1, stats.done / stats.total) : 0;
+      dl.bar.classList.toggle('live', stats.live);
+      dl.bar.style.width = (pct * 100).toFixed(1) + '%';
+      const bits = [stats.live ? `${stats.done} chunks (recording live)` : `${stats.done}/${stats.total} chunks (${Math.round(pct * 100)}%)`, fmtBytes(stats.bytes), fmtBytes(stats.bytes / el) + '/s'];
+      if (stats.audioSec) bits.push(fmtTime(stats.audioSec) + ' audio');
+      if (!stats.live && stats.done && stats.done < stats.total) bits.push('ETA ' + fmtTime((stats.total - stats.done) * el / stats.done));
+      if (stats.skipped) bits.push(stats.skipped + ' skipped');
+      dl.stats.textContent = bits.join(' · ');
+    }
+
+    function rangeHeader(spec) {
+      if (!spec) return undefined;
+      const [len, off] = spec.split('@').map(Number);
+      return { Range: `bytes=${off}-${off + len - 1}` };
+    }
+    const segKey = s => s.url + '|' + (s.range || '');
+    async function fetchPool(list, conc, signal, direct) {
+      const res = new Array(list.length), failed = [];
+      let cursor = 0;
+      const worker = async () => {
+        while (!signal.aborted) {
+          const i = cursor++;
+          if (i >= list.length) return;
+          const s = list[i];
+          try {
+            const buf = await fetchVia(s.url, 'buffer', { retries: 3, signal, direct, headers: rangeHeader(s.range) });
+            res[i] = buf; stats.done++; stats.bytes += buf.byteLength; stats.audioSec += s.dur || 0; renderStats();
+          } catch (e) { if (signal.aborted) return; failed.push(i); }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(conc, list.length) }, worker));
+      return { res, failed: failed.sort((a, b) => a - b) };
+    }
+
+    // ── containers ──
+    const mp4BoxType = b => { const u = new Uint8Array(b); return u.length < 8 ? '' : String.fromCharCode(u[4], u[5], u[6], u[7]); };
+    function stripId3(buffer) {
+      const b = new Uint8Array(buffer); let pos = 0;
+      while (pos + 10 <= b.length && b[pos] === 73 && b[pos + 1] === 68 && b[pos + 2] === 51) {
+        const size = ((b[pos + 6] & 127) << 21) | ((b[pos + 7] & 127) << 14) | ((b[pos + 8] & 127) << 7) | (b[pos + 9] & 127);
+        const total = 10 + size + ((b[pos + 5] & 16) ? 10 : 0);
+        if (pos + total > b.length) break;
+        pos += total;
+      }
+      return pos ? buffer.slice(pos) : buffer;
+    }
+    function detectContainer(buffer) {
+      const b = new Uint8Array(buffer);
+      if (b.length >= 8 && ['ftyp', 'styp', 'moof', 'sidx'].includes(mp4BoxType(buffer))) return 'mp4';
+      if (b.length >= 2 && b[0] === 255 && (b[1] & 240) === 240) return 'aac';
+      if (b.length >= 188 && (b[0] === 71 || (b.length > 192 && b[4] === 71))) return 'ts';
+      return 'unknown';
+    }
+
+    // ── MP3 conversion (TS → AAC demux → Web Audio decode in ~60 s chunks → lamejs) ──
+    const ADTS_RATES = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
+    const MP3_RATES = [48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000];
+    function concatBytes(list) {
+      let n = 0; for (const a of list) n += a.byteLength;
+      const o = new Uint8Array(n); let p = 0;
+      for (const a of list) { o.set(a instanceof Uint8Array ? a : new Uint8Array(a), p); p += a.byteLength; }
+      return o;
+    }
+    function tsToAdts(buffer) {
+      const b = new Uint8Array(buffer);
+      const size = b[0] === 0x47 ? 188 : (b.length > 4 && b[4] === 0x47 ? 192 : 188), lead = size === 192 ? 4 : 0;
+      let pmtPid = -1, audioPid = -1, otherAudio = 0;
+      const parts = [];
+      for (let p = lead; p + 188 <= b.length; p += size) {
+        if (b[p] !== 0x47) continue;
+        const pusi = b[p + 1] & 0x40, pid = ((b[p + 1] & 0x1f) << 8) | b[p + 2], afc = (b[p + 3] >> 4) & 3;
+        let i = p + 4;
+        if (afc === 0 || afc === 2) continue;
+        if (afc === 3) i += 1 + b[i];
+        if (i >= p + 188) continue;
+        if (pid === 0 || pid === pmtPid) {
+          if (pusi) i += 1 + b[i];
+          const secLen = ((b[i + 1] & 0x0f) << 8) | b[i + 2], end = Math.min(p + 188, i + 3 + secLen - 4);
+          if (pid === 0) {
+            for (let j = i + 8; j + 4 <= end; j += 4) if (((b[j] << 8) | b[j + 1]) !== 0) { pmtPid = ((b[j + 2] & 0x1f) << 8) | b[j + 3]; break; }
+          } else if (audioPid < 0) {
+            let j = i + 12 + (((b[i + 10] & 0x0f) << 8) | b[i + 11]);
+            while (j + 5 <= end) {
+              const type = b[j], esPid = ((b[j + 1] & 0x1f) << 8) | b[j + 2];
+              if (type === 0x0f) { audioPid = esPid; break; }
+              if (type === 0x03 || type === 0x04 || type === 0x11) otherAudio = type;
+              j += 5 + (((b[j + 3] & 0x0f) << 8) | b[j + 4]);
+            }
+          }
+        } else if (pid === audioPid) {
+          if (pusi && b[i] === 0 && b[i + 1] === 0 && b[i + 2] === 1) i += 9 + b[i + 8];
+          if (i < p + 188) parts.push(b.subarray(i, p + 188));
+        }
+      }
+      if (audioPid < 0) throw new Error(otherAudio ? 'audio codec is not AAC' : 'no AAC audio track in TS segment');
+      return concatBytes(parts);
+    }
+    function adtsFrames(u8, frames) {
+      let i = 0;
+      while (i + 7 <= u8.length) {
+        if (u8[i] === 0xff && (u8[i + 1] & 0xf6) === 0xf0) {
+          const len = ((u8[i + 3] & 3) << 11) | (u8[i + 4] << 3) | (u8[i + 5] >> 5);
+          if (len < 7 || i + len > u8.length) break;
+          frames.push(u8.subarray(i, i + len)); i += len;
+        } else i++;
+      }
+    }
+    function mp4SampleRate(init) {
+      const b = new Uint8Array(init);
+      for (let t = 0; t + 32 < b.length; t++) if (b[t] === 0x6d && b[t + 1] === 0x70 && b[t + 2] === 0x34 && b[t + 3] === 0x61) return (b[t + 28] << 8) | b[t + 29];
+      return 0;
+    }
+    function convertProgress(p) {
+      dl.prog.hidden = false; dl.bar.classList.remove('live');
+      dl.bar.style.width = (p * 100).toFixed(1) + '%';
+      dl.stats.textContent = `Converting to MP3… ${Math.round(p * 100)}%`;
+    }
+    async function toMp3(type, parts, init, kbps) {
+      if (!window.lamejs?.Mp3Encoder) throw new Error('MP3 encoder did not load');
+      const Ctx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+      if (!Ctx) throw new Error('browser has no audio decoder');
+      const chunks = []; let enc = null, chs = 1;
+      const toI16 = f => { const o = new Int16Array(f.length); for (let i = 0; i < f.length; i++) { const s = f[i] < -1 ? -1 : f[i] > 1 ? 1 : f[i]; o[i] = s < 0 ? s * 0x8000 : s * 0x7fff; } return o; };
+      const encode = (audio, skip, rate) => {
+        if (!enc) {
+          if (!MP3_RATES.includes(rate)) throw new Error(rate + ' Hz is not supported by MP3');
+          chs = Math.min(2, Math.max(1, audio.numberOfChannels));
+          enc = new lamejs.Mp3Encoder(chs, rate, kbps);
+        }
+        if (audio.length - skip <= 0) return;
+        const l = toI16(audio.getChannelData(0).subarray(skip));
+        const r = chs > 1 ? toI16(audio.getChannelData(Math.min(1, audio.numberOfChannels - 1)).subarray(skip)) : null;
+        for (let i = 0; i < l.length; i += 36864) {
+          const m = r ? enc.encodeBuffer(l.subarray(i, i + 36864), r.subarray(i, i + 36864)) : enc.encodeBuffer(l.subarray(i, i + 36864));
+          if (m.length) chunks.push(new Uint8Array(m.buffer, m.byteOffset, m.length).slice());
+        }
+      };
+      const check = () => { if (convertAbort) throw new Error('MP3 conversion stopped'); };
+      convertProgress(0);
+      if (type === 'mp4') {
+        const rate = mp4SampleRate(init) || 44100, ctx = new Ctx(2, 1, rate), G = 20;
+        for (let g = 0; g < parts.length; g += G) {
+          check();
+          encode(await ctx.decodeAudioData(concatBytes([init, ...parts.slice(g, g + G)]).buffer), 0, rate);
+          convertProgress(Math.min(1, (g + G) / parts.length)); await wait(0);
+        }
+      } else {
+        const frames = [];
+        for (const p of parts) adtsFrames(type === 'ts' ? tsToAdts(p) : new Uint8Array(p), frames);
+        if (!frames.length) throw new Error('no AAC frames found');
+        const rate = ADTS_RATES[(frames[0][2] >> 2) & 0xf];
+        if (!rate) throw new Error('invalid AAC header');
+        const ctx = new Ctx(2, 1, rate), CH = Math.max(64, Math.round(60 * rate / 1024)), OVER = 16;
+        for (let s = 0; s < frames.length; s += CH) {
+          check();
+          const from = Math.max(0, s - OVER), slice = frames.slice(from, s + CH);
+          const audio = await ctx.decodeAudioData(concatBytes(slice).buffer);
+          const dropped = slice.length * 1024 - audio.length;
+          encode(audio, Math.max(0, (s - from) * 1024 - Math.max(0, dropped)), rate);
+          convertProgress(Math.min(1, (s + CH) / frames.length)); await wait(0);
+        }
+      }
+      if (!enc) throw new Error('nothing decoded');
+      const tail = enc.flush();
+      if (tail.length) chunks.push(new Uint8Array(tail.buffer, tail.byteOffset, tail.length).slice());
+      return chunks;
+    }
+
+    function saveBlob(blob, filename) {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob); a.download = filename;
+      document.body.appendChild(a); a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 120000);
+    }
+    async function saveParts(parts, init) {
+      const cleaned = parts.map(stripId3).filter(p => p.byteLength);
+      if (!cleaned.length) throw new Error('chunks contained no audio');
+      const type = detectContainer(cleaned[0]);
+      let ext, mime, output;
+      if (type === 'mp4') { if (!init) throw new Error('fMP4 stream is missing its init segment'); ext = 'm4a'; mime = 'audio/mp4'; output = [init, ...cleaned]; }
+      else if (type === 'ts') { ext = 'ts'; mime = 'video/mp2t'; output = parts; }
+      else if (type === 'aac') { ext = 'aac'; mime = 'audio/aac'; output = cleaned; }
+      else throw new Error('unknown audio format, nothing saved');
+      const base = (dl.name.value.trim() || 'xspace_replay').replace(/\.(mp3|aac|ts|m4a)$/i, '').replace(/[\\/:*?"<>|]+/g, '_');
+      if (dl.format.value !== 'orig') {
+        const kbps = Number(dl.format.value.split('-')[1]) || 128;
+        dlLog(`Converting to MP3 (${kbps} kbps)… press Stop to keep the original format instead.`);
+        convertAbort = false; phase = 'convert';
+        try {
+          const mp3 = await toMp3(type, type === 'ts' ? parts : cleaned, init, kbps);
+          const blob = new Blob(mp3, { type: 'audio/mpeg' });
+          saveBlob(blob, base + '.mp3');
+          return { name: base + '.mp3', size: blob.size };
+        } catch (e) { dlLog(`MP3 conversion ${/stopped/.test(e.message) ? 'stopped' : 'failed (' + e.message + ')'}, so saving the original format instead.`); }
+        finally { phase = ''; }
+      }
+      const blob = new Blob(output, { type: mime });
+      saveBlob(blob, `${base}.${ext}`);
+      return { name: `${base}.${ext}`, size: blob.size };
+    }
+
+    async function runDownload() {
+      const src = out.replay.value.trim() || extractM3u8(anyInput.value);
+      if (!src) return dlLog('Paste a link at the top and press Get Links first.');
+      dl.log.textContent = '';
+      ctrl = new AbortController();
+      const signal = ctrl.signal, direct = !dl.proxy.checked;
+      dl.btn.disabled = true; dl.stop.disabled = false;
+      Object.assign(stats, { start: performance.now(), bytes: 0, done: 0, total: 0, audioSec: 0, skipped: 0, live: false });
+      const seen = new Set(), parts = [];
+      let url = src, init = null, fatal = null, first = true;
+      try {
+        while (!signal.aborted) {
+          const m = await resolvePlaylist(url, { signal, direct, onStep: c => first && dlLog('Checking ' + c) });
+          if (first) { dlLog(`Using: ${m.url}`); dlLog(m.ended ? `Replay: ${m.segments.length} chunks` : 'Space is LIVE. Recording until it ends or you press Stop.'); }
+          first = false; url = m.url; stats.live = !m.ended;
+          if (m.key) throw new Error('This stream is encrypted and cannot be downloaded.');
+          if (m.map && !init) init = await fetchVia(m.map.url, 'buffer', { retries: 3, signal, direct, headers: rangeHeader(m.map.range) });
+          const fresh = m.segments.filter(s => !seen.has(segKey(s)));
+          if (fresh.length) {
+            const conc = Number(dl.conc.value) || 6;
+            stats.total = stats.done + fresh.length; renderStats();
+            let { res, failed } = await fetchPool(fresh, conc, signal, direct);
+            for (let pass = 1; pass <= 2 && failed.length && !signal.aborted; pass++) {
+              dlLog(`Retrying ${failed.length} failed chunk(s), pass ${pass}/2…`);
+              await wait(1500 * pass);
+              const r = await fetchPool(failed.map(i => fresh[i]), Math.max(1, conc >> 2), signal, direct);
+              r.res.forEach((b, j) => { if (b) res[failed[j]] = b; });
+              failed = failed.filter((_, j) => !r.res[j]);
+            }
+            for (let i = 0; i < fresh.length; i++) {
+              if (res[i]) { seen.add(segKey(fresh[i])); parts.push(res[i]); }
+              else if (signal.aborted) break;
+              else { seen.add(segKey(fresh[i])); stats.skipped++; }
+            }
+            stats.total = stats.done + stats.skipped; renderStats();
+          }
+          if (m.ended) break;
+          await wait(Math.max(1500, Math.min(7000, m.target * 500)));
+        }
+      } catch (e) { fatal = e; }
+
+      try {
+        if (!parts.length) throw (fatal && fatal.message !== 'Stopped') ? fatal : new Error(signal.aborted ? 'Stopped before any audio was downloaded.' : 'No audio downloaded.');
+        if (fatal && fatal.message !== 'Stopped') dlLog('Interrupted: ' + fatal.message + '. Saving what was downloaded…');
+        else if (signal.aborted) dlLog('Stopped. Saving what was downloaded…');
+        const saved = await saveParts(parts, init);
+        dlLog(`✓ Saved ${saved.name} (${fmtBytes(saved.size)}${stats.audioSec ? ', ' + fmtTime(stats.audioSec) + ' of audio' : ''})${stats.skipped ? `. ${stats.skipped} chunk(s) could not be fetched and were skipped` : ''}.`);
+        dl.stats.textContent = `Saved ${saved.name} · ${fmtBytes(saved.size)}`; dl.bar.classList.remove('live'); dl.bar.style.width = '100%';
+      } catch (e) {
+        dlLog('ERROR: ' + e.message);
+        if (e.details) dlLog(e.details.join('\n'));
+      } finally {
+        dl.btn.disabled = false; dl.stop.disabled = true; ctrl = null;
+      }
+    }
+    dl.btn.addEventListener('click', runDownload);
+    dl.stop.addEventListener('click', () => {
+      if (phase === 'convert') { convertAbort = true; return; }
+      ctrl?.abort();
+    });
+    window.addEventListener('beforeunload', e => { if (ctrl) { e.preventDefault(); e.returnValue = ''; } });
+
+    // Console helpers (kept from the original page)
+    window.xspacesCombo = {
+      masterUrl, candidates, liveFrom,
+      resolve: url => resolvePlaylist(extractM3u8(url) || url),
+      anyToAll: async url => { const u = extractM3u8(url) || url; const r = await resolvePlaylist(u); return { live: liveFrom(u), master: r.master, replay: r.url, ended: r.ended }; },
+    };
+  })();
+  </script>
+</body>
+</html>
