@@ -171,7 +171,7 @@
   <!-- ================= DOWNLOADER ================= -->
   <div class="container">
     <div class="sectionTitle">Downloader</div>
-    <div class="hint">Downloads the REPLAY above (or the link you pasted), merges it into one file, and can convert it to MP3 in your browser. If the Space is still live, it keeps recording until you press Stop.</div>
+    <div class="hint">Downloads the REPLAY above (or the link you pasted) and saves it as one file: M4A (original quality) or MP3. If the Space is still live, it keeps recording until you press Stop.</div>
 
     <div class="dlGrid">
       <div class="dlField">
@@ -181,10 +181,11 @@
       <div class="dlField">
         <label for="dlFormat">Save as</label>
         <select id="dlFormat" class="dlSelect">
-          <option value="mp3-128" selected>MP3 · 128 kbps</option>
+          <option value="m4a" selected>M4A · original quality (fastest)</option>
+          <option value="mp3-128">MP3 · 128 kbps</option>
           <option value="mp3-64">MP3 · 64 kbps (smaller)</option>
           <option value="mp3-192">MP3 · 192 kbps</option>
-          <option value="orig">Original (fastest)</option>
+          <option value="orig">Raw stream (.ts / .aac)</option>
         </select>
       </div>
       <div class="dlField">
@@ -524,7 +525,22 @@
         const hls = new Hls({
           enableWorker: true,
           loader: class extends Hls.DefaultConfig.loader {
-            load(context, config, callbacks) { if (context?.url) context.url = corsProxy(context.url); super.load(context, config, callbacks); }
+            // Fetch through the proxy, but report the REAL url back to hls.js so it resolves
+            // relative chunk paths (chunk_123.aac) against X's server, not the proxy's address.
+            load(context, config, callbacks) {
+              const realUrl = context.__realUrl || context.url;
+              context.__realUrl = realUrl;
+              context.url = corsProxy(realUrl);
+              const onSuccess = callbacks.onSuccess;
+              super.load(context, config, {
+                ...callbacks,
+                onSuccess: (response, stats, ctx, details) => {
+                  response.url = realUrl;
+                  if (ctx) ctx.url = realUrl;
+                  onSuccess(response, stats, ctx, details);
+                },
+              });
+            }
           }
         });
         currentHls = hls;
@@ -740,6 +756,61 @@
       return chunks;
     }
 
+    // ── M4A: repackage AAC frames into an .m4a (MP4) file. No re-encoding, so it is instant and lossless. ──
+    function adtsToM4a(frames) {
+      const h = frames[0];
+      const profile = ((h[2] >> 6) & 3) + 1, freqIdx = (h[2] >> 2) & 15, chans = ((h[2] & 1) << 2) | (h[3] >> 6);
+      const rate = ADTS_RATES[freqIdx];
+      if (!rate) throw new Error('invalid AAC header');
+      const payloads = frames.map(f => f.subarray((f[1] & 1) ? 7 : 9));
+      const n = payloads.length, dur = n * 1024;
+      const u32 = v => [(v >>> 24) & 255, (v >>> 16) & 255, (v >>> 8) & 255, v & 255];
+      const u16 = v => [(v >> 8) & 255, v & 255];
+      const str = s => [...s].map(c => c.charCodeAt(0));
+      const bytes = p => p instanceof Uint8Array ? p : new Uint8Array(p);
+      const box = (type, ...p) => { const body = concatBytes(p.map(bytes)); const o = new Uint8Array(8 + body.length); o.set(u32(o.length)); o.set(str(type), 4); o.set(body, 8); return o; };
+      const full = (type, ver, flags, ...p) => box(type, [ver, (flags >> 16) & 255, (flags >> 8) & 255, flags & 255], ...p);
+      const zeros = k => new Array(k).fill(0);
+      const matrix = [...u32(0x10000), ...zeros(12), ...u32(0x10000), ...zeros(12), ...u32(0x40000000)];
+      const asc = u16((profile << 11) | (freqIdx << 7) | ((chans || 1) << 3));
+      const esds = full('esds', 0, 0, [
+        3, 25, 0, 0, 0,
+        4, 17, 0x40, 0x15, 0, 0, 0, ...u32(0), ...u32(0),
+        5, 2, ...asc,
+        6, 1, 2,
+      ]);
+      const mp4a = box('mp4a', [...zeros(6), ...u16(1), ...zeros(8), ...u16(chans || 1), ...u16(16), ...zeros(4), ...u32(rate * 65536)], esds);
+      const sizes = new Uint8Array(n * 4), dv = new DataView(sizes.buffer);
+      payloads.forEach((p, i) => dv.setUint32(i * 4, p.length));
+      const moovFor = offset => box('moov',
+        full('mvhd', 0, 0, [...u32(0), ...u32(0), ...u32(rate), ...u32(dur), ...u32(0x10000), ...u16(0x100), ...zeros(10), ...matrix, ...zeros(24), ...u32(2)]),
+        box('trak',
+          full('tkhd', 0, 7, [...u32(0), ...u32(0), ...u32(1), ...zeros(4), ...u32(dur), ...zeros(8), ...u16(0), ...u16(0), ...u16(0x100), ...zeros(2), ...matrix, ...u32(0), ...u32(0)]),
+          box('mdia',
+            full('mdhd', 0, 0, [...u32(0), ...u32(0), ...u32(rate), ...u32(dur), ...u16(0x55c4), ...u16(0)]),
+            full('hdlr', 0, 0, [...zeros(4), ...str('soun'), ...zeros(12), ...str('SoundHandler'), 0]),
+            box('minf',
+              full('smhd', 0, 0, zeros(4)),
+              box('dinf', full('dref', 0, 0, u32(1), full('url ', 0, 1))),
+              box('stbl',
+                full('stsd', 0, 0, u32(1), mp4a),
+                full('stts', 0, 0, [...u32(1), ...u32(n), ...u32(1024)]),
+                full('stsc', 0, 0, [...u32(1), ...u32(1), ...u32(n), ...u32(1)]),
+                full('stsz', 0, 0, [...u32(0), ...u32(n)], sizes),
+                full('stco', 0, 0, [...u32(1), ...u32(offset)]))))));
+      const ftyp = box('ftyp', [...str('M4A '), ...u32(0), ...str('M4A '), ...str('mp42'), ...str('isom')]);
+      const moovLen = moovFor(0).length;
+      const dataLen = payloads.reduce((a, p) => a + p.length, 0);
+      const moov = moovFor(ftyp.length + moovLen + 8);
+      return [ftyp, moov, new Uint8Array([...u32(8 + dataLen), ...str('mdat')]), ...payloads];
+    }
+    function aacFramesFrom(type, parts) {
+      const frames = [];
+      for (const p of parts) adtsFrames(type === 'ts' ? tsToAdts(p) : new Uint8Array(p), frames);
+      if (!frames.length) throw new Error('no AAC frames found');
+      return frames;
+    }
+
     function saveBlob(blob, filename) {
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob); a.download = filename;
@@ -756,7 +827,15 @@
       else if (type === 'aac') { ext = 'aac'; mime = 'audio/aac'; output = cleaned; }
       else throw new Error('unknown audio format, nothing saved');
       const base = (dl.name.value.trim() || 'xspace_replay').replace(/\.(mp3|aac|ts|m4a)$/i, '').replace(/[\\/:*?"<>|]+/g, '_');
-      if (dl.format.value !== 'orig') {
+      if (dl.format.value === 'm4a') {
+        if (type === 'mp4') { const blob = new Blob(output, { type: mime }); saveBlob(blob, base + '.m4a'); return { name: base + '.m4a', size: blob.size }; }
+        try {
+          dlLog('Packaging as M4A…');
+          const blob = new Blob(adtsToM4a(aacFramesFrom(type, type === 'ts' ? parts : cleaned)), { type: 'audio/mp4' });
+          saveBlob(blob, base + '.m4a');
+          return { name: base + '.m4a', size: blob.size };
+        } catch (e) { dlLog('M4A packaging failed (' + e.message + '), so saving the raw stream instead.'); }
+      } else if (dl.format.value !== 'orig') {
         const kbps = Number(dl.format.value.split('-')[1]) || 128;
         dlLog(`Converting to MP3 (${kbps} kbps)… press Stop to keep the original format instead.`);
         convertAbort = false; phase = 'convert';
@@ -774,45 +853,107 @@
     }
 
     async function runDownload() {
-      const src = (lastIsLive && out.live.value.trim()) || out.replay.value.trim() || extractM3u8(anyInput.value);
-      if (!src) return dlLog('Paste a link at the top and press Get Links first.');
+      const replaySrc = out.replay.value.trim();
+      const liveSrc = lastIsLive ? out.live.value.trim() : '';
+      const pasted = extractM3u8(anyInput.value);
+      if (!replaySrc && !liveSrc && !pasted) return dlLog('Paste a link at the top and press Get Links first.');
       dl.log.textContent = '';
       ctrl = new AbortController();
       const signal = ctrl.signal, direct = !dl.proxy.checked;
       dl.btn.disabled = true; dl.stop.disabled = false;
       Object.assign(stats, { start: performance.now(), bytes: 0, done: 0, total: 0, audioSec: 0, skipped: 0, live: false });
-      const seen = new Set(), parts = [];
-      let url = src, init = null, fatal = null, first = true;
+
+      // Chunks are matched by file name, so the same chunk listed in both the REPLAY
+      // and the LIVE playlist is only downloaded once.
+      const keyOf = s => s.url.split('?')[0].split('/').pop() + '|' + (s.range || '');
+      const got = new Map();          // key → audio bytes
+      const arrival = [];             // keys in the order they arrived
+      let replayOrder = new Map();    // key → position in the newest REPLAY listing
+      let init = null, fatal = null;
+
+      const useMeta = async m => {
+        if (m.key) throw new Error('This stream is encrypted and cannot be downloaded.');
+        if (m.map && !init) init = await fetchVia(m.map.url, 'buffer', { retries: 3, signal, direct, headers: rangeHeader(m.map.range) });
+      };
+      async function grab(segs) {
+        const fresh = segs.filter(s => !got.has(keyOf(s)));
+        if (!fresh.length) return 0;
+        const conc = Number(dl.conc.value) || 6;
+        stats.total = stats.done + stats.skipped + fresh.length; renderStats();
+        let { res, failed } = await fetchPool(fresh, conc, signal, direct);
+        for (let pass = 1; pass <= 2 && failed.length && !signal.aborted; pass++) {
+          dlLog(`Retrying ${failed.length} failed chunk(s), pass ${pass}/2…`);
+          await wait(1500 * pass);
+          const r = await fetchPool(failed.map(i => fresh[i]), Math.max(1, conc >> 2), signal, direct);
+          r.res.forEach((b, j) => { if (b) res[failed[j]] = b; });
+          failed = failed.filter((_, j) => !r.res[j]);
+        }
+        let added = 0;
+        for (let i = 0; i < fresh.length; i++) {
+          const k = keyOf(fresh[i]);
+          if (res[i]) { got.set(k, res[i]); arrival.push(k); added++; }
+          else if (signal.aborted) break;
+          else { got.set(k, null); stats.skipped++; }
+        }
+        stats.total = stats.done + stats.skipped; renderStats();
+        return added;
+      }
+      async function pollReplay(url) {
+        const m = await resolvePlaylist(url, { signal, direct });
+        await useMeta(m);
+        replayOrder = new Map(m.segments.map((s, i) => [keyOf(s), i]));
+        await grab(m.segments);
+        return m;
+      }
+
       try {
-        while (!signal.aborted) {
-          const m = await resolvePlaylist(url, { signal, direct, onStep: c => first && dlLog('Checking ' + c) });
-          if (first) { dlLog(`Using: ${m.url}`); dlLog(m.ended ? `Replay: ${m.segments.length} chunks` : 'Space is LIVE. Recording until it ends or you press Stop.'); }
-          first = false; url = m.url; stats.live = !m.ended;
-          if (m.key) throw new Error('This stream is encrypted and cannot be downloaded.');
-          if (m.map && !init) init = await fetchVia(m.map.url, 'buffer', { retries: 3, signal, direct, headers: rangeHeader(m.map.range) });
-          const fresh = m.segments.filter(s => !seen.has(segKey(s)));
-          if (fresh.length) {
-            const conc = Number(dl.conc.value) || 6;
-            stats.total = stats.done + fresh.length; renderStats();
-            let { res, failed } = await fetchPool(fresh, conc, signal, direct);
-            for (let pass = 1; pass <= 2 && failed.length && !signal.aborted; pass++) {
-              dlLog(`Retrying ${failed.length} failed chunk(s), pass ${pass}/2…`);
-              await wait(1500 * pass);
-              const r = await fetchPool(failed.map(i => fresh[i]), Math.max(1, conc >> 2), signal, direct);
-              r.res.forEach((b, j) => { if (b) res[failed[j]] = b; });
-              failed = failed.filter((_, j) => !r.res[j]);
+        // 1) Everything recorded so far, from the REPLAY link.
+        let replayUrl = replaySrc || (!liveSrc ? pasted : '');
+        let replayEnded = true;
+        if (replayUrl) {
+          dlLog('Downloading the recording from the start (REPLAY)…');
+          const m = await pollReplay(replayUrl);
+          replayUrl = m.url; replayEnded = m.ended && !liveSrc;
+          dlLog(`REPLAY: ${m.segments.length} chunks${m.segments.length ? ', ' + fmtTime(m.segments.reduce((a, s) => a + (s.dur || 0), 0)) : ''}.`);
+        }
+
+        // 2) If the Space is live, keep going from the LIVE stream until it ends or Stop.
+        const liveUrl = liveSrc;
+        if (liveUrl || !replayEnded) {
+          stats.live = true; renderStats();
+          dlLog(liveUrl ? 'Space is LIVE. Now recording live. Press Stop to save.' : 'Playlist is still growing. Recording until it ends. Press Stop to save.');
+          let firstLive = true, misses = 0;
+          while (!signal.aborted) {
+            if (replayUrl && !replayEnded) {
+              try { const m = await pollReplay(replayUrl); if (m.ended && !liveUrl) replayEnded = true; }
+              catch (e) { if (signal.aborted) break; }
             }
-            for (let i = 0; i < fresh.length; i++) {
-              if (res[i]) { seen.add(segKey(fresh[i])); parts.push(res[i]); }
-              else if (signal.aborted) break;
-              else { seen.add(segKey(fresh[i])); stats.skipped++; }
+            if (liveUrl) {
+              let lv = null;
+              try { lv = await tryLiveDirect(liveUrl, { signal, direct }); } catch (e) { if (signal.aborted) break; }
+              if (!lv) {
+                if (++misses < 3) { await wait(3000); continue; }
+                dlLog('The Space has ended. Grabbing the final part of the replay…');
+                try { await pollReplay(replayUrl || masterUrl(liveUrl)); } catch (_) {}
+                break;
+              }
+              misses = 0;
+              await useMeta(lv);
+              if (firstLive && got.size && !lv.segments.some(s => got.has(keyOf(s)))) dlLog('Note: the live stream did not overlap with the replay yet. Any missing seconds are filled in from the replay when the Space ends.');
+              firstLive = false;
+              await grab(lv.segments);
+              await wait(Math.max(1500, Math.min(7000, lv.target * 500)));
+            } else {
+              if (replayEnded) break;
+              await wait(4000);
             }
-            stats.total = stats.done + stats.skipped; renderStats();
           }
-          if (m.ended) break;
-          await wait(Math.max(1500, Math.min(7000, m.target * 500)));
         }
       } catch (e) { fatal = e; }
+
+      // Put chunks in the right order: REPLAY order first, then live-only chunks in arrival order.
+      const rank = new Map(arrival.map((k, i) => [k, replayOrder.has(k) ? replayOrder.get(k) : replayOrder.size + i]));
+      const parts = arrival.slice().sort((a, b) => rank.get(a) - rank.get(b)).map(k => got.get(k)).filter(Boolean);
 
       try {
         if (!parts.length) throw (fatal && fatal.message !== 'Stopped') ? fatal : new Error(signal.aborted ? 'Stopped before any audio was downloaded.' : 'No audio downloaded.');
