@@ -317,8 +317,20 @@
       return { variants, segments, key, map, target, ended: lines.includes('#EXT-X-ENDLIST') };
     }
     // Tries every candidate; follows master → playlist_N → segments. Returns the first that really has audio.
+    // A LIVE (dynamic) link is checked directly first. While a Space is live the
+    // archive copy on the replay server can look "finished", so it must not decide live/ended.
+    async function tryLiveDirect(url, { signal, direct } = {}) {
+      if (!/dynamic_playlist\.m3u8/.test(url)) return null;
+      try {
+        let cur = url, parsed = parseManifest(await fetchVia(cur, 'text', { signal, direct, retries: 1 }), cur);
+        if (parsed.variants.length) { cur = parsed.variants[0]; parsed = parseManifest(await fetchVia(cur, 'text', { signal, direct, retries: 1 }), cur); }
+        if (parsed.segments.length && !parsed.ended) return { url: cur, master: masterUrl(url), live: true, ...parsed };
+      } catch (e) { if (signal?.aborted) throw new Error('Stopped'); }
+      return null;
+    }
     let lastWorking = '';
     async function resolvePlaylist(url, { onStep, signal, direct } = {}) {
+      if (/type=live/.test(url)) { const lv = await tryLiveDirect(url, { signal, direct }); if (lv) return lv; }
       const base = /(?:playlist_\d+|master_dynamic_\d+)\.m3u8/.test(url) ? candidates(url) : candidates(masterUrl(url));
       const urls = [...new Set([lastWorking && base.includes(lastWorking) ? lastWorking : null, ...base].filter(Boolean))];
       const errors = [];
@@ -356,7 +368,7 @@
     const out = { live: $('liveOut'), master: $('masterOut'), replay: $('replayOut') };
     const notes = { live: $('liveNote'), master: $('masterNote'), replay: $('replayNote') };
     const replayOpen = $('replayOpen'), convertBtn = $('convertBtn');
-    let lastResolved = null;
+    let lastResolved = null, lastIsLive = false;
 
     function setStatus(text, type = '') { statusEl.innerHTML = ''; statusEl.append(text); statusEl.className = 'status' + (type ? ' ' + type : ''); }
     function setNote(k, text, cls = '') { notes[k].textContent = text; notes[k].className = 'note' + (cls ? ' ' + cls : ''); }
@@ -365,7 +377,7 @@
       setNote('replay', 'The recording link (verified to work)');
       setNote('live', 'Dynamic link, only works while the Space is live');
       setNote('master', 'Master playlist that points to the replay');
-      replayOpen.hidden = true; lastResolved = null;
+      replayOpen.hidden = true; lastResolved = null; lastIsLive = false;
     }
 
     // ── Space link → stream link (via the Worker's ?space= endpoint) ──
@@ -436,21 +448,37 @@
       out.master.value = masterUrl(url);
       setStatus('Finding the replay…', 'busy');
       try {
-        const r = await resolvePlaylist(url, { onStep: c => setStatus(`Checking ${hostOf(c)} · ${c.match(/\/(x-media-live-stream|periscope-replays-public|periscope-replay-direct-prod)/)?.[1] || 'stream'}…`, 'busy') });
+        // Check the LIVE stream and look for the REPLAY at the same time.
+        const [probe, rr] = await Promise.allSettled([
+          live ? tryLiveDirect(live) : Promise.resolve(null),
+          resolvePlaylist(masterUrl(url), { onStep: c => setStatus(`Checking ${hostOf(c)} · ${c.match(/\/(x-media-live-stream|periscope-replays-public|periscope-replay-direct-prod)/)?.[1] || 'stream'}…`, 'busy') }),
+        ]);
+        const isLive = !!probe.value?.live || /running/i.test(currentSpace?.state || '');
+        lastIsLive = isLive;
+        if (isLive) setNote('live', live ? '✓ LIVE right now. Press Play here to listen live' : '✓ LIVE right now', 'ok');
+        else if (live) setNote('live', 'The Space has ended, so this LIVE link no longer plays', 'warn');
+
+        if (rr.status === 'rejected') {
+          if (isLive) {
+            setNote('replay', 'Not ready yet. The replay appears after the Space ends', 'warn');
+            setStatus('The Space is LIVE. Press ▶ Play on LIVE to listen. Download records it live until you press Stop.', 'success');
+            return;
+          }
+          throw rr.reason;
+        }
+        const r = rr.value;
         lastResolved = r;
         out.replay.value = r.url;
         out.master.value = r.master;
         replayOpen.href = r.url; replayOpen.hidden = false;
         const dur = r.segments.reduce((s, x) => s + (x.dur || 0), 0);
-        if (r.ended) {
-          setNote('replay', `✓ Working: ${r.segments.length} chunks${dur ? ', ' + fmtTime(dur) + ' of audio' : ''}`, 'ok');
-          setNote('master', '✓ Working', 'ok');
-          if (live) setNote('live', 'The Space has ended, so this LIVE link no longer plays', 'warn');
-          setStatus('Done. REPLAY link found and verified.', 'success');
+        setNote('master', '✓ Working', 'ok');
+        if (isLive) {
+          setNote('replay', `Recorded so far${dur ? ': ' + fmtTime(dur) : ''}. Plays from the start; full replay after the Space ends`, 'warn');
+          setStatus('The Space is LIVE. Press ▶ Play on LIVE to hear it live, or Play on REPLAY to start from the beginning.', 'success');
         } else {
-          setNote('replay', `● Space is still LIVE. This playlist keeps growing (${fmtTime(dur)} so far)`, 'warn');
-          if (live) setNote('live', '✓ Space is live right now', 'ok');
-          setStatus('The Space is still live. The REPLAY link works now and will hold the full recording after it ends. Download can record it live.', 'warn');
+          setNote('replay', `✓ Working: ${r.segments.length} chunks${dur ? ', ' + fmtTime(dur) + ' of audio' : ''}`, 'ok');
+          setStatus('Done. REPLAY link found and verified.', 'success');
         }
         if (!$('dlFilename').dataset.touched && !currentSpace) $('dlFilename').value = 'xspace_' + (r.url.match(/\/([A-Za-z0-9_-]{8,})\/[^/]*$/)?.[1] || 'replay').slice(0, 40);
       } catch (e) {
@@ -500,10 +528,24 @@
           }
         });
         currentHls = hls;
-        hls.on(Hls.Events.ERROR, (_, d) => { if (d?.fatal) setStatus(`Playback error (${d.type}${d.details ? ' · ' + d.details : ''}). Try MPV/VLC, or the link may have expired.`, 'error'); });
-        hls.on(Hls.Events.MANIFEST_PARSED, () => player.play().catch(() => {}));
+        hls.on(Hls.Events.ERROR, (_, d) => {
+          if (!d?.fatal) return;
+          if (d.type === Hls.ErrorTypes.NETWORK_ERROR && !hls.__retried) { hls.__retried = true; setStatus('Network hiccup, retrying…', 'warn'); return hls.startLoad(); }
+          if (d.type === Hls.ErrorTypes.MEDIA_ERROR && !hls.__recovered) { hls.__recovered = true; setStatus('Audio decode hiccup, recovering…', 'warn'); return hls.recoverMediaError(); }
+          setStatus(`Playback error (${d.type}${d.details ? ' · ' + d.details : ''}). Try MPV/VLC, or the link may have expired.`, 'error');
+        });
+        // Tell the user if the stream has no audio track the browser can use.
+        hls.on(Hls.Events.BUFFER_CODECS, (_, d) => {
+          const tracks = Object.keys(d || {});
+          if (!tracks.some(t => t === 'audio' || t === 'audiovideo')) setStatus(`${label} loaded but the browser found no playable audio track (${tracks.join(', ') || 'none'}). Try VLC/MPV.`, 'error');
+        });
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          player.muted = false; if (player.volume === 0) player.volume = 1;
+          player.play().then(() => setStatus(`Playing ${label}.`, 'success'))
+            .catch(() => setStatus(`${label} is loaded. Press ▶ on the player to start.`, 'warn'));
+        });
         hls.loadSource(url); hls.attachMedia(player);
-        return setStatus(`Playing ${label}.`, 'success');
+        return setStatus(`Loading ${label}…`, 'busy');
       }
       if (player.canPlayType('application/vnd.apple.mpegurl')) {
         player.src = corsProxy(url); player.play().catch(() => {});
@@ -732,7 +774,7 @@
     }
 
     async function runDownload() {
-      const src = out.replay.value.trim() || extractM3u8(anyInput.value);
+      const src = (lastIsLive && out.live.value.trim()) || out.replay.value.trim() || extractM3u8(anyInput.value);
       if (!src) return dlLog('Paste a link at the top and press Get Links first.');
       dl.log.textContent = '';
       ctrl = new AbortController();
